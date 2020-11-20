@@ -1,6 +1,7 @@
 /* SynchroChecker by DrSnuggles 2020
 
 */
+"use strict"
 
 //
 // Force SSL
@@ -17,14 +18,25 @@ var synchro = (function(my){
   bgRatio, // aspect ratio
   scale, // scale factor
   ctx, // video context, the visual canvas
-  rect = {x:1130, y:655, w:245, h:110}, // a rect around the lips
-  //rect = {x:670, y:664, w:145, h:43}, // a rect around the lips
+  rect = {x:670, y:664, w:145, h:43}, // MonaLisa: a rect around the lips
+  //rect = {x:1130, y:655, w:245, h:110}, // Samia: a rect around the lips
+  mouse,
+  poly = [],
+  lips, // cropped area
   amp = 40, // amplitude of max level
   lastVol = 0,
   actx = new AudioContext(),
+  mic,
   anal, // the analyser node
-  userGestures = ['mousedown', 'touchstart', 'dragend'], // browsers need gesture before accessing userMedia
+  userGestures = ['change', 'click', 'contextmenu', 'dblclick', 'mouseup', 'pointerup', 'reset', 'submit', 'touchend'], // browsers need gesture before accessing userMedia
+  rAF,
   debug = false
+
+  // RMB
+  document.oncontextmenu = () => {
+    if (poly.length > 0) crop()
+    return false
+  }
 
   //
   // document init
@@ -38,50 +50,33 @@ var synchro = (function(my){
         background:#000
       }
     </style>
-    <canvas id="canv"></canvas>
+    <canvas id="canv" style="display:none;position:absolute"></canvas>
     <div id="tb"></div>`
 
-    // copy imgData to canvas
     ctx = canv.getContext('2d')
-    bgImg.onload = function(e) {
-      canv.width = bgImg.width
-      canv.height = bgImg.height
-      canv.style.position = 'absolute'
-      bgRatio = canv.width / canv.height
-      ctx.imageSmoothingEnabled = true
-      ctx.drawImage(bgImg, 0, 0)
+    ctx.imageSmoothingEnabled = true
+    //ctx.globalCompositeOperation = 'destination-over';
 
-      //
-      // Events
-      //
-      addEventListener('resize', resizer)
-      canv.addEventListener('mousemove', (e) =>{
-        mouse = {x: e.offsetX, y: e.offsetY}
-      })
-      canv.addEventListener('click', () =>{
-      })
+    //
+    // Events
+    //
+    addEventListener('resize', resizer)
+    canv.addEventListener('mousemove', (e) =>{
+      mouse = {x: e.offsetX, y: e.offsetY}
+    })
+    canv.addEventListener('click', (e) =>{
+      poly.push({x: e.offsetX/scale, y: e.offsetY/scale})
+    })
 
-      // just some infos
-      if (debug) {
-        //console.log(canv.toDataURL('image/png'))
-        //console.log(canv.toDataURL('image/jpeg'))
-        //console.log(canv.toDataURL('image/webp'))
-        // data:image/png;base64,
-        console.log('PNG size: '+ ((canv.toDataURL('image/png').length-22)*3/4/1024).toFixed(1) +' kB')
-        // data:image/jpeg;base64,
-        console.log('JPEG size: '+ ((canv.toDataURL('image/jpeg', .99).length-23)*3/4/1024).toFixed(1) +' kB')
-        // data:image/webp;base64,
-        console.log('WebP size: '+ ((canv.toDataURL('image/webp', .99).length-23)*3/4/1024).toFixed(1) +' kB')
-      }
+    // dropHandler
+    dropHandler.init(window, fileDropped, fileProgress)
 
-      // finally start the render loop
-      resizer()
-      requestAnimationFrame(renderLoop)
-    } // img.onload
-    var tmp = 'samia.webp'
-    //var tmp = 'monalisa.webp'
+    // use std image
+    loadImage('monalisa.webp')
 
-    bgImg.src = tmp
+    // finally start the render loop
+    renderLoop()
+
   } // doc init
 
   //
@@ -104,16 +99,16 @@ var synchro = (function(my){
       var tmp = stream.getAudioTracks()[0].getSettings()
       if (debug) {
         Object.entries(tmp).forEach(([key, value]) => {
-          console.log(key, value)
+          if (debug) console.log(key, value)
         })
       }
 
       // attach
-      var src = actx.createMediaStreamSource(stream)
+      mic = actx.createMediaStreamSource(stream)
       //meter = createAudioMeter()
       anal = actx.createAnalyser()
       anal.fftSize = 32 // min is enough for meter
-      src.connect(anal)
+      mic.connect(anal)
       // anal.connect(actx.destination)
 
     }
@@ -167,27 +162,159 @@ var synchro = (function(my){
   }
 
   //
+  // drop
+  //
+  function fileDropped(o){
+    let fType = o.type.substr(0, 5)
+    if (fType === 'image') {
+      poly = []
+      loadImage(o.data)
+    } else if (fType === 'audio') {
+      loadAudio(o.data)
+    } else {
+      log('Found file type:'+ fType)
+    }
+  }
+  function fileProgress(o){
+    log('File progress: '+ o)
+  }
+
+  function loadImage(src) {
+    // copy imgData to canvas
+    bgImg.onload = function(e) {
+      canv.width = bgImg.width
+      canv.height = bgImg.height
+      canv.style.display = 'block'
+      bgRatio = canv.width / canv.height
+      ctx.drawImage(bgImg, 0, 0)
+
+      resizer()
+
+      // just some infos
+      if (debug) {
+        // data:image/png;base64,
+        console.log('PNG size: '+ ((canv.toDataURL('image/png').length-22)*3/4/1024).toFixed(1) +' kB')
+        // data:image/jpeg;base64,
+        console.log('JPEG size: '+ ((canv.toDataURL('image/jpeg', .99).length-23)*3/4/1024).toFixed(1) +' kB')
+        // data:image/webp;base64,
+        console.log('WebP size: '+ ((canv.toDataURL('image/webp', .99).length-23)*3/4/1024).toFixed(1) +' kB')
+      }
+
+    } // img.onload
+
+    bgImg.src = src
+  }
+  function crop(){
+    // aka keyHole
+    log('crop')
+    ctx.save()
+
+    //ctx.drawImage(bgImg, 0, 0)// draw bg
+    ctx.clearRect(0, 0, canv.width, canv.height)
+    //ctx.globalCompositeOperation = 'destination-out'
+    let path = new Path2D()
+    //ctx.beginPath()
+    let minX = poly[0].x
+    let maxX = minX
+    let minY = poly[0].y
+    let maxY = minY
+    path.moveTo(poly[0].x, poly[0].y)
+    for (let i = 1; i < poly.length; i++) {
+      minX = Math.min(minX, poly[i].x)
+      maxX = Math.max(maxX, poly[i].x)
+      minY = Math.min(minY, poly[i].y)
+      maxY = Math.max(maxY, poly[i].y)
+      path.lineTo(poly[i].x, poly[i].y)
+    }
+    //ctx.stroke()
+    //ctx.clip()
+    //console.log(path, minX, minY, maxX-minX, maxY-minY)
+    ctx.clip(path)
+    rect = {x: minX, y: minY, w: maxX-minX, h: maxY-minY}
+
+    ctx.drawImage(bgImg, 0, 0)// draw bg
+    // now we have image through keyhole
+    // lips = ctx.getImageData(0, 0, canv.width, canv.height)
+    lips = new Image()
+    /*
+    lips.onload = (e) => {
+      console.log(lips)
+    }
+    */
+    lips.src = canv.toDataURL()
+
+    // would be nice to have some bounding rect but then i need to save minX,minY for postioning
+
+    // reset vars
+    poly = []
+    ctx.restore()
+
+
+//ctx.globalCompositeOperation = 'destination-out';
+    //cancelAnimationFrame(rAF)
+  }
+
+  function loadAudio(dat){
+    //console.log(dat)
+    actx.decodeAudioData(dat, (buf)=>{
+      //console.log(buf)
+      let src = actx.createBufferSource()
+      src.buffer = buf
+      mic.disconnect(anal)
+      src.connect(anal)
+      anal.connect(actx.destination)
+      src.loop = true
+      src.start(0)
+
+    }, (e)=>{console.error(e)})
+
+  }
+
+  //
   // Render loop
   //
-  function renderLoop() {
-    requestAnimationFrame(renderLoop)
-
+  function renderLoop(){
+    rAF = requestAnimationFrame(renderLoop)
+    //console.log('renderLoop')
     scale = canv.clientWidth / canv.width
 
     // clear old
-    //ctx.clearRect(0, 0, canv.width, canv.height)
+    //if (lips) ctx.clearRect(0, 0, canv.width, canv.height)
 
     // draw bg
+    /*if (!lips)*/
     ctx.drawImage(bgImg, 0, 0)
 
     // draw lips
     var vol = getVolume()
-    ctx.drawImage(bgImg, rect.x, rect.y, rect.w, rect.h, rect.x-(vol*amp), rect.y-(vol*amp), rect.w+(2*vol*amp), rect.h+(2*vol*amp))
+    //if (lips) ctx.putImageData(lips, 0, 0, canv.width, canv.height, 0-(vol*amp), 0-(vol*amp), canv.width+(2*vol*amp), canv.height+(2*vol*amp))
+    if (lips) {
+      //ctx.drawImage(lips, rect.x, rect.y, rect.w, rect.h, rect.x-(vol*amp), rect.y-(vol*amp), rect.w+(2*vol*amp), rect.h+(2*vol*amp))
+      //ctx.drawImage(lips, 0, 0, lips.naturalWidth, lips.naturalHeight, 0-(vol*amp), 0-(vol*amp), lips.naturalWidth+(2*vol*amp), lips.naturalHeight+(2*vol*amp))
+      //console.log(0, 0, lips.naturalWidth, lips.naturalHeight, 0-(vol*amp), 0-(vol*amp), lips.naturalWidth+(2*vol*amp), lips.naturalHeight+(2*vol*amp))
+      ctx.drawImage(lips, rect.x, rect.y, rect.w, rect.h, rect.x-(vol*amp), rect.y-(vol*amp), rect.w+(2*vol*amp), rect.h+(2*vol*amp))
+    } else {
+      //use simple rect
+      ctx.drawImage(bgImg, rect.x, rect.y, rect.w, rect.h, rect.x-(vol*amp), rect.y-(vol*amp), rect.w+(2*vol*amp), rect.h+(2*vol*amp))
+    }
+
+    // draw polygon
+    if (poly.length > 0) {
+      ctx.strokeStyle = '#FFF'
+      ctx.lineWidth = 2/scale
+      ctx.beginPath()
+      ctx.moveTo(poly[0].x, poly[0].y)
+      for (let i = 1; i < poly.length; i++) {
+        ctx.lineTo(poly[i].x, poly[i].y)
+      }
+      ctx.lineTo(mouse.x/scale, mouse.y/scale)
+      ctx.stroke()
+    }
 
     // draw rect around the lips
     if (debug) {
       // lips rect
-      ctx.strokeRect(rect.x, rect.y, rect.w, rect.h)
+      //ctx.strokeRect(rect.x, rect.y, rect.w, rect.h)
       // meter
       ctx.fillRect(0, 0, vol*canv.width, 10)
     }
