@@ -25,7 +25,7 @@ var synchro = (function(my){
   lips, // cropped area
   amp = 40, // amplitude of max level
   lastVol = 0,
-  actx = new AudioContext(),
+  actx,
   mic,
   anal, // the analyser node
   userGestures = ['change', 'click', 'contextmenu', 'dblclick', 'mouseup', 'pointerup', 'reset', 'submit', 'touchend'], // browsers need gesture before accessing userMedia
@@ -91,6 +91,10 @@ var synchro = (function(my){
       removeEventListener(i, gestureEvent)
     })
 
+    actx = new AudioContext()
+    anal = actx.createAnalyser()
+    anal.fftSize = 32 // min is enough for meter
+
     // start microphone
     navigator.mediaDevices.getUserMedia({audio:true})
     .then(gotLocalMediaStream)
@@ -105,15 +109,13 @@ var synchro = (function(my){
 
       // attach
       mic = actx.createMediaStreamSource(stream)
-      //meter = createAudioMeter()
-      anal = actx.createAnalyser()
-      anal.fftSize = 32 // min is enough for meter
       mic.connect(anal)
       // anal.connect(actx.destination)
 
     }
     function handleLocalMediaStreamError(e){
-      console.error(e)
+      //console.error(e)
+      console.info('looks like you have no microphone')
     }
 
   }
@@ -260,7 +262,7 @@ var synchro = (function(my){
       //console.log(buf)
       let src = actx.createBufferSource()
       src.buffer = buf
-      mic.disconnect(anal)
+      if (typeof mic !== 'undefined') mic.disconnect(anal)
       src.connect(anal)
       anal.connect(actx.destination)
       src.loop = true

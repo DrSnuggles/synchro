@@ -8,5 +8,6 @@
 - Drop audio to replace mic
 
 ## History
+- 2020-11-22 Fixed no microphone disconnect bug
 - 2020-11-20 Drop audio/video, clip polygon
 - 2020-11-16 Initial commit. Just used simple rect and mic
